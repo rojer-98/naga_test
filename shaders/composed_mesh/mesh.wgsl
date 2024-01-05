@@ -1,8 +1,13 @@
-#import bevy_pbr::mesh_view_bindings
-#import bevy_pbr::mesh_bindings
+#import mesh_view_bindings
+#import mesh_bindings
 
 // NOTE: Bindings must come before functions that use them!
-#import bevy_pbr::mesh_functions
+#import mesh_functions as Func
+#import mesh_types as Types
+#import mesh_vertex_output as Output 
+
+@group(2) @binding(0)
+var<uniform> mesh: Types::Mesh;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -24,7 +29,6 @@ struct Vertex {
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    #import bevy_pbr::mesh_vertex_output
 };
 
 @vertex
@@ -33,11 +37,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 #ifdef SKINNED
     var model = skin_model(vertex.joint_indices, vertex.joint_weights);
     out.world_normal = skin_normals(model, vertex.normal);
-#else
-    var model = mesh.model;
-    out.world_normal = mesh_normal_local_to_world(vertex.normal);
 #endif
-    out.world_position = mesh_position_local_to_world(model, vec4<f32>(vertex.position, 1.0));
 #ifdef VERTEX_UVS
     out.uv = vertex.uv;
 #endif
@@ -48,13 +48,12 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.color = vertex.color;
 #endif
 
-    out.clip_position = mesh_position_world_to_clip(out.world_position);
     return out;
 }
 
 struct FragmentInput {
     @builtin(front_facing) is_front: bool,
-    #import bevy_pbr::mesh_vertex_output
+    #import mesh_vertex_output
 };
 
 @fragment

@@ -18,35 +18,40 @@ const SPV_DIR: &str = "./spv";
 fn to_spv() -> Result<()> {
     for entry in read_dir(SHADERS_DIR)? {
         let entry = entry?;
-        let entry_path = entry.path();
-        let mut spv_entry = entry_path.clone();
-        spv_entry.set_extension("");
+        let entry_ftype = entry.file_type()?;
 
-        let spv_file_name = spv_entry
-            .file_name()
-            .ok_or(anyhow!("Filename is not set"))?
-            .to_str()
-            .unwrap();
-        let spv_file_name = format!("{SPV_DIR}/{spv_file_name}.spv");
-        let mut spv_file = File::create(spv_file_name)?;
+        if entry_ftype.is_file() {
+            let entry_path = entry.path();
+            let mut spv_entry = entry_path.clone();
+            spv_entry.set_extension("");
 
-        let sh_data = read(entry_path)?;
-        let sh_module = wgsl::parse_str(&String::from_utf8(sh_data)?)?;
-        let sh_info = Validator::new(
-            ValidationFlags::default(),
-            Capabilities::CLIP_DISTANCE | Capabilities::CULL_DISTANCE,
-        )
-        .validate(&sh_module)?;
+            let spv_file_name = spv_entry
+                .file_name()
+                .ok_or(anyhow!("Filename is not set"))?
+                .to_str()
+                .unwrap();
+            let spv_file_name = format!("{SPV_DIR}/{spv_file_name}.spv");
+            let mut spv_file = File::create(spv_file_name)?;
 
-        let spv_data = spv::write_vec(&sh_module, &sh_info, &Default::default(), None)?;
-        let spv_bytes = spv_data
-            .iter()
-            .fold(Vec::with_capacity(spv_data.len() * 4), |mut v, w| {
-                v.extend_from_slice(&w.to_le_bytes());
-                v
-            });
+            let sh_data = read(entry_path)?;
+            let sh_module = wgsl::parse_str(&String::from_utf8(sh_data)?)?;
+            let sh_info = Validator::new(
+                ValidationFlags::default(),
+                Capabilities::CLIP_DISTANCE | Capabilities::CULL_DISTANCE,
+            )
+            .validate(&sh_module)?;
 
-        spv_file.write_all(&spv_bytes)?;
+            let spv_data = spv::write_vec(&sh_module, &sh_info, &Default::default(), None)?;
+            let spv_bytes =
+                spv_data
+                    .iter()
+                    .fold(Vec::with_capacity(spv_data.len() * 4), |mut v, w| {
+                        v.extend_from_slice(&w.to_le_bytes());
+                        v
+                    });
+
+            spv_file.write_all(&spv_bytes)?;
+        }
     }
 
     Ok(())
@@ -72,20 +77,24 @@ fn main() -> Result<()> {
                 let common_shader_name = format!("{SHADERS_DIR}/{file_name}/{shader_name}.wgsl");
 
                 let mut composer = Composer::default();
-                for sub_entry in read_dir(entry.path())? {
-                    let sub_entry = sub_entry?;
-                    println!("{sub_entry:?}");
-                    let mut load_composable = |source: &str, file_path: &str| match composer
-                        .add_composable_module(ComposableModuleDescriptor {
+                let mut reload = vec![];
+                let mut load_composable =
+                    |source: &str, file_path: &str| -> Option<(String, String)> {
+                        match composer.add_composable_module(ComposableModuleDescriptor {
                             source,
                             file_path,
                             ..Default::default()
                         }) {
-                        Ok(_module) => {}
-                        Err(e) => {
-                            println!("? -> {e:#?}")
+                            Ok(_module) => None,
+                            Err(e) => {
+                                println!("? -> {e:#?}");
+                                Some((source.to_string(), file_path.to_string()))
+                            }
                         }
                     };
+
+                for sub_entry in read_dir(entry.path())? {
+                    let sub_entry = sub_entry?;
 
                     let sub_entry_path = sub_entry.path();
                     let sub_source = String::from_utf8(read(sub_entry_path)?)?;
@@ -98,14 +107,26 @@ fn main() -> Result<()> {
                         .to_string();
 
                     if !sub_file_name.contains(shader_name) {
-                        load_composable(&sub_source, &sub_file_name);
+                        if let Some(not_load) = load_composable(&sub_source, &sub_file_name) {
+                            reload.push(not_load);
+                        }
                     }
                 }
 
-                let source = String::from_utf8(read(common_shader_name.clone())?)?;
+                loop {
+                    if let Some((source, file_path)) = reload.pop() {
+                        if let Some(not_load) = load_composable(&source, &file_path) {
+                            reload.push(not_load);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                let source = String::from_utf8(read(&common_shader_name)?)?;
                 let module = composer.make_naga_module(NagaModuleDescriptor {
                     source: &source,
-                    file_path: &format!("{SHADERS_DIR}/{common_shader_name}.wgsl"),
+                    file_path: &common_shader_name,
                     shader_defs: [(Default::default())].into(),
                     ..Default::default()
                 })?;

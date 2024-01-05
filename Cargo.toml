@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.79"
 naga = {version="0.14.2", features =["wgsl-in","spv-out"]}
-naga_oil = "0.11.0"
+naga_oil = {version="0.11.0", features=["prune"]}
 
